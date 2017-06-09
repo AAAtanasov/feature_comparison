@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 from sklearn.datasets import fetch_20newsgroups
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.feature_extraction.text import HashingVectorizer
-from sklearn.feature_selection import SelectKBest, chi2
+from sklearn.feature_selection import SelectKBest, chi2, SelectFromModel
 from sklearn.linear_model import RidgeClassifier
 from sklearn.pipeline import Pipeline
 from sklearn.svm import LinearSVC
@@ -29,7 +29,7 @@ from sklearn.neighbors import NearestCentroid
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.utils.extmath import density
 from sklearn import metrics
-
+from sklearn.linear_model import LogisticRegression
 
 # Display progress logs on stdout
 logging.basicConfig(level=logging.INFO,
@@ -123,6 +123,11 @@ y_train, y_test = data_train.target, data_test.target
 
 print("Extracting features from the training data using a sparse vectorizer")
 t0 = time()
+
+opts.use_hashing = False
+opts.print_top10 = True
+
+
 if opts.use_hashing:
     vectorizer = HashingVectorizer(stop_words='english', non_negative=True,
                                    n_features=opts.n_features)
@@ -178,7 +183,7 @@ def benchmark(clf):
     print("Training: ")
     print(clf)
     t0 = time()
-    clf.fit(X_train, y_train)
+    clf.fit(X_new, y_train)
     train_time = time() - t0
     print("train time: %0.3fs" % train_time)
 
@@ -216,52 +221,82 @@ def benchmark(clf):
 
 
 results = []
-for clf, name in (
-        (RidgeClassifier(tol=1e-2, solver="lsqr"), "Ridge Classifier"),
-        (Perceptron(n_iter=50), "Perceptron"),
-        (PassiveAggressiveClassifier(n_iter=50), "Passive-Aggressive"),
-        (KNeighborsClassifier(n_neighbors=10), "kNN"),
-        (RandomForestClassifier(n_estimators=100), "Random forest")):
-    print('=' * 80)
-    print(name)
-    results.append(benchmark(clf))
-
-for penalty in ["l2", "l1"]:
-    print('=' * 80)
-    print("%s penalty" % penalty.upper())
-    # Train Liblinear model
-    results.append(benchmark(LinearSVC(loss='l2', penalty=penalty,
-                                            dual=False, tol=1e-3)))
-
-    # Train SGD model
-    results.append(benchmark(SGDClassifier(alpha=.0001, n_iter=50,
-                                           penalty=penalty)))
-
-# Train SGD with Elastic Net penalty
-print('=' * 80)
-print("Elastic-Net penalty")
-results.append(benchmark(SGDClassifier(alpha=.0001, n_iter=50,
-                                       penalty="elasticnet")))
-
-# Train NearestCentroid without threshold
-print('=' * 80)
-print("NearestCentroid (aka Rocchio classifier)")
-results.append(benchmark(NearestCentroid()))
-
-# Train sparse Naive Bayes classifiers
-print('=' * 80)
-print("Naive Bayes")
-results.append(benchmark(MultinomialNB(alpha=.01)))
-results.append(benchmark(BernoulliNB(alpha=.01)))
+# for clf, name in (
+#         (RidgeClassifier(tol=1e-2, solver="lsqr"), "Ridge Classifier"),
+#         (Perceptron(n_iter=50), "Perceptron"),
+#         (PassiveAggressiveClassifier(n_iter=50), "Passive-Aggressive"),
+#         (KNeighborsClassifier(n_neighbors=10), "kNN"),
+#         (RandomForestClassifier(n_estimators=100), "Random forest")):
+#     print('=' * 80)
+#     print(name)
+#     results.append(benchmark(clf))
+#
+# for penalty in ["l2", "l1"]:
+#     print('=' * 80)
+#     print("%s penalty" % penalty.upper())
+#     # Train Liblinear model
+#     results.append(benchmark(LinearSVC(loss='l2', penalty=penalty,
+#                                             dual=False, tol=1e-3)))
+#
+#     # Train SGD model
+#     results.append(benchmark(SGDClassifier(alpha=.0001, n_iter=50,
+#                                            penalty=penalty)))
+#
+# # Train SGD with Elastic Net penalty
+# print('=' * 80)
+# print("Elastic-Net penalty")
+# results.append(benchmark(SGDClassifier(alpha=.0001, n_iter=50,
+#                                        penalty="elasticnet")))
+#
+# # Train NearestCentroid without threshold
+# print('=' * 80)
+# print("NearestCentroid (aka Rocchio classifier)")
+# results.append(benchmark(NearestCentroid()))
+#
+# # Train sparse Naive Bayes classifiers
+# print('=' * 80)
+# print("Naive Bayes")
+# results.append(benchmark(MultinomialNB(alpha=.01)))
+# results.append(benchmark(BernoulliNB(alpha=.01)))
 
 print('=' * 80)
 print("LinearSVC with L1-based feature selection")
 # The smaller C, the stronger the regularization.
 # The more regularization, the more sparsity.
-results.append(benchmark(Pipeline([
-  ('feature_selection', LinearSVC(penalty="l1", dual=False, tol=1e-3)),
-  ('classification', LinearSVC())
-])))
+
+lr_estimator = LogisticRegression(penalty='l1')
+from_model = SelectFromModel(lr_estimator)
+temp_vector = TfidfVectorizer(sublinear_tf=True, max_df=0.5, stop_words='english')
+X_new = temp_vector.fit_transform(data_train.data)
+X_new = from_model.fit_transform(X_new, y_train)
+X_test = from_model.transform(X_test)
+feature_names = []
+feature_names = temp_vector.get_feature_names()
+feature_names = [feature_names[i] for i
+                 in from_model.get_support(indices=True)]
+feature_names = np.asarray(feature_names)
+clf_new = LinearSVC()
+clf_new.fit(X_new, y_train)
+pred_new = clf_new.predict(X_test)
+score = metrics.accuracy_score(y_test, pred_new)
+
+if hasattr(clf_new, 'coef_'):
+    print("dimensionality: %d" % clf_new.coef_.shape[1])
+    print("density: %f" % density(clf_new.coef_))
+
+    if opts.print_top10 and feature_names is not None:
+        print("top 10 keywords per class:")
+        for i, label in enumerate(target_names):
+            top10 = np.argsort(clf_new.coef_[i])[-10:]
+            print(trim("%s: %s" % (label, " ".join(feature_names[top10]))))
+    print()
+
+# pred_new = from_model.pre
+
+# results.append(benchmark(Pipeline([
+#   ('feature_selection', LinearSVC(penalty="l1", dual=False, tol=1e-3)),
+#   ('classification', LinearSVC())
+# ])))
 
 # make some plots
 

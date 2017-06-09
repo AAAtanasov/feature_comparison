@@ -6,13 +6,15 @@ import re
 from sklearn.feature_selection import chi2
 import numpy as np
 from sklearn.datasets import fetch_20newsgroups
-from sklearn.feature_selection import SelectKBest, chi2
+from sklearn.feature_selection import SelectKBest, chi2, SelectFromModel
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.feature_extraction.text import HashingVectorizer
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.feature_extraction import DictVectorizer
 import  pickle
 import csv
+from sklearn.linear_model import LogisticRegression
+
 
 folder_list = []
 main_dir = "20news-18828"
@@ -104,9 +106,12 @@ def save_to_file(file_name, list_to_save):
         for item in list_to_save:
             myfile.write('{0} {1} \n'.format(int(item[1]), item[0]))
 
-save_to_file('test1.txt', sorted_freq)
+# save_to_file('test1.txt', sorted_freq)
 
+"""Linear SVC with L1 regression"""
+reg = LogisticRegression(penalty='l1')
 
+X_new_train = reg.fit_transform(data_train.data, y_train)
 
 # X_test = ch2.transform(X_test)
 # if feature_names:
