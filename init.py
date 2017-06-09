@@ -12,7 +12,7 @@ from sklearn.feature_extraction.text import HashingVectorizer
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.feature_extraction import DictVectorizer
 import  pickle
-
+import csv
 
 folder_list = []
 main_dir = "20news-18828"
@@ -41,9 +41,9 @@ main_dir = "20news-18828"
 # extract_words(folder_list[0])
 
 categories = [
-    # 'alt.atheism',
-    # 'talk.religion.misc',
-    # 'comp.graphics',
+    'alt.atheism',
+    'talk.religion.misc',
+    'comp.graphics',
     'sci.space',
 ]
 
@@ -78,31 +78,41 @@ useHashing = False
 #                                  stop_words='english')
 #     X_train = vectorizer.fit_transform(data_train.data)
 cv = CountVectorizer()
-hv = HashingVectorizer(stop_words='english', non_negative=True,
-                               n_features=2 ** 16)
+cv.fit_transform(data_train.data)
+hv = HashingVectorizer(stop_words=None, non_negative=True, n_features=2 ** 16)
 X_vector = hv.transform(data_train.data)
-X_train = cv.fit_transform(data_train.data)
-freqs = [(word, X_vector.getcol(idx).sum()) for word, idx in cv.vocabulary_.items()]
+# Count vector transform
+# X_train = cv.fit_transform(data_train.data)
+# freqs = [(word, X_vector.getcol(idx).sum()) for word, idx in cv.vocabulary_.items()]
+# sorted_freq = sorted(freqs, key = lambda x: -x[1])
+# pickle.dump(sorted_freq, open("sorted.p", "wb"))
 
-sorted_freq = sorted(freqs, key = lambda x: -x[1])
-
-pickle.dump(sorted_freq, open("sorted.p", "wb"))
-
-#sort from largest to smallest
-# print sorted(freqs, key = lambda x: -x[1])
-# result = list(cv.get_feature_names(), np.asarray(X_vector.sum(axis=0)).ravel())
-# X_test = vectorizer.transform(data_test.data)
 
 feature_names = cv.get_feature_names()
 # result = zip(feature_names, np.asarray())
+print('fitting to chi')
+ch2 = SelectKBest(chi2, k=2 ** 16)
+X_train = ch2.fit_transform(X_vector, y_train)
+print('sorting')
+freqs = [(word, X_train.getcol(idx).sum()) for word, idx in cv.vocabulary_.items()]
+sorted_freq = sorted(freqs, key = lambda x: -x[1])
 
-ch2 = SelectKBest(chi2, k=10)
-X_train = ch2.fit_transform(X_train, y_train)
-X_test = ch2.transform(X_test)
-if feature_names:
-    # keep selected feature names
-    feature_names = [feature_names[i] for i
-                     in ch2.get_support(indices=True)]
 
-print(feature_names)
+def save_to_file(file_name, list_to_save):
+    print('Saving')
+    with open(file_name, 'w') as myfile:
+        for item in list_to_save:
+            myfile.write('{0} {1} \n'.format(int(item[1]), item[0]))
+
+save_to_file('test1.txt', sorted_freq)
+
+
+
+# X_test = ch2.transform(X_test)
+# if feature_names:
+#     # keep selected feature names
+#     feature_names = [feature_names[i] for i
+#                      in ch2.get_support(indices=True)]
+#
+# print(feature_names)
 end = 1
