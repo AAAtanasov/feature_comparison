@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 from sklearn.datasets import fetch_20newsgroups
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.feature_extraction.text import HashingVectorizer
-from sklearn.feature_selection import SelectKBest, chi2, SelectFromModel
+from sklearn.feature_selection import SelectKBest, chi2, SelectFromModel, f_regression, RFE, SelectPercentile
 from sklearn.linear_model import RidgeClassifier
 from sklearn.pipeline import Pipeline
 from sklearn.svm import LinearSVC
@@ -30,11 +30,13 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.utils.extmath import density
 from sklearn import metrics
 from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import KFold, GridSearchCV
+from sklearn.externals.joblib import Memory
+import tempfile
 
 # Display progress logs on stdout
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s %(levelname)s %(message)s')
-
 
 # parse commandline arguments
 op = OptionParser()
@@ -108,6 +110,7 @@ target_names = data_train.target_names
 def size_mb(docs):
     return sum(len(s.encode('utf-8')) for s in docs) / 1e6
 
+
 data_train_size_mb = size_mb(data_train.data)
 data_test_size_mb = size_mb(data_test.data)
 
@@ -126,7 +129,6 @@ t0 = time()
 
 opts.use_hashing = False
 opts.print_top10 = True
-
 
 if opts.use_hashing:
     vectorizer = HashingVectorizer(stop_words='english', non_negative=True,
@@ -183,7 +185,7 @@ def benchmark(clf):
     print("Training: ")
     print(clf)
     t0 = time()
-    clf.fit(X_new, y_train)
+    clf.fit(X_train, y_train)
     train_time = time() - t0
     print("train time: %0.3fs" % train_time)
 
@@ -241,10 +243,10 @@ results = []
 #     # Train SGD model
 #     results.append(benchmark(SGDClassifier(alpha=.0001, n_iter=50,
 #                                            penalty=penalty)))
-#
-# # Train SGD with Elastic Net penalty
-# print('=' * 80)
-# print("Elastic-Net penalty")
+
+# Train SGD with Elastic Net penalty
+print('=' * 80)
+print("Elastic-Net penalty")
 # results.append(benchmark(SGDClassifier(alpha=.0001, n_iter=50,
 #                                        penalty="elasticnet")))
 #
@@ -259,37 +261,103 @@ results = []
 # results.append(benchmark(MultinomialNB(alpha=.01)))
 # results.append(benchmark(BernoulliNB(alpha=.01)))
 
-print('=' * 80)
-print("LinearSVC with L1-based feature selection")
-# The smaller C, the stronger the regularization.
-# The more regularization, the more sparsity.
 
-lr_estimator = LogisticRegression(penalty='l1')
-from_model = SelectFromModel(lr_estimator)
+"""Forward feature selection"""
+
+
+def f_regression_test(X, Y):
+    return f_regression(X, Y, center=False)
+
+
+cachedir = tempfile.mkdtemp()
+mem = Memory(cachedir=cachedir, verbose=1)
+
 temp_vector = TfidfVectorizer(sublinear_tf=True, max_df=0.5, stop_words='english')
 X_new = temp_vector.fit_transform(data_train.data)
-X_new = from_model.fit_transform(X_new, y_train)
-X_test = from_model.transform(X_test)
+X_test_new = temp_vector.transform(data_test.data)
+feature_names = temp_vector.get_feature_names()
+f_regression_new = mem.cache(f_regression_test)
+anova = SelectPercentile(f_regression_new)
+X_new = anova.fit_transform(X_new, y_train)
+X_test_new = anova.transform(X_test_new)
+
+ridge = RidgeClassifier(tol=1e-2, solver="lsqr")
+
+clf = ridge
+
+# clf = Pipeline([('anova', anova), ('ridge', ridge)])
+# clf = GridSearchCV(clf, {'anova__percentile': [5, 10, 20]}, cv=KFold())
+clf.fit(X_new, y_train)  # set the best parameters
 feature_names = []
 feature_names = temp_vector.get_feature_names()
 feature_names = [feature_names[i] for i
-                 in from_model.get_support(indices=True)]
+                 in anova.get_support(indices=True)]
 feature_names = np.asarray(feature_names)
-clf_new = LinearSVC()
-clf_new.fit(X_new, y_train)
-pred_new = clf_new.predict(X_test)
-score = metrics.accuracy_score(y_test, pred_new)
 
-if hasattr(clf_new, 'coef_'):
-    print("dimensionality: %d" % clf_new.coef_.shape[1])
-    print("density: %f" % density(clf_new.coef_))
+pred_test = clf.predict(X_test_new)
+score = metrics.accuracy_score(y_test, pred_test)
+
+if hasattr(clf, 'coef_'):
+    print("dimensionality: %d" % clf.coef_.shape[1])
+    print("density: %f" % density(clf.coef_))
 
     if opts.print_top10 and feature_names is not None:
         print("top 10 keywords per class:")
         for i, label in enumerate(target_names):
-            top10 = np.argsort(clf_new.coef_[i])[-10:]
+            top10 = np.argsort(clf.coef_[i])[-10:]
             print(trim("%s: %s" % (label, " ".join(feature_names[top10]))))
     print()
+# coef_ = clf.best_estimator_.steps[-1][1].coef_
+
+
+
+# shape = coef_.shape[1]
+# minus_shape = -shape
+# coef_ = clf.best_estimator_.steps[0][1].inverse_transform(coef_.reshape(shape, -shape))
+# coef_selection_ = coef_.reshape(size, size)
+
+# coef_ = clf.best_estimator_.steps[-1][1].coef_
+# coef_ = clf.best_estimator_.steps[0][1].inverse_transform(coef_.reshape(1, -1))
+# coef_selection_ = coef_.reshape(size, size)
+
+# X_new = from_model.fit_transform(X_new, y_train)
+# X_test = from_model.transform(X_test)
+# feature_names = []
+# feature_names = temp_vector.get_feature_names()
+# feature_names = [feature_names[i] for i
+#                  in from_model.get_support(indices=True)]
+
+print('=' * 80)
+print("LinearSVC with L1-based feature selection")
+# The smaller C, the stronger the regularization.
+# The more regularization, the more sparsity.
+#
+# lr_estimator = LogisticRegression(penalty='l1')
+# from_model = SelectFromModel(lr_estimator)
+# temp_vector = TfidfVectorizer(sublinear_tf=True, max_df=0.5, stop_words='english')
+# X_new = temp_vector.fit_transform(data_train.data)
+# X_new = from_model.fit_transform(X_new, y_train)
+# X_test = from_model.transform(X_test)
+# feature_names = []
+# feature_names = temp_vector.get_feature_names()
+# feature_names = [feature_names[i] for i
+#                  in from_model.get_support(indices=True)]
+# feature_names = np.asarray(feature_names)
+# clf_new = LinearSVC()
+# clf_new.fit(X_new, y_train)
+# pred_new = clf_new.predict(X_test)
+# score = metrics.accuracy_score(y_test, pred_new)
+#
+# if hasattr(clf_new, 'coef_'):
+#     print("dimensionality: %d" % clf_new.coef_.shape[1])
+#     print("density: %f" % density(clf_new.coef_))
+#
+#     if opts.print_top10 and feature_names is not None:
+#         print("top 10 keywords per class:")
+#         for i, label in enumerate(target_names):
+#             top10 = np.argsort(clf_new.coef_[i])[-10:]
+#             print(trim("%s: %s" % (label, " ".join(feature_names[top10]))))
+#     print()
 
 # pred_new = from_model.pre
 
