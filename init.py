@@ -15,7 +15,6 @@ import  pickle
 import csv
 from sklearn.linear_model import LogisticRegression
 
-
 folder_list = []
 main_dir = "20news-18828"
 # X_train = []

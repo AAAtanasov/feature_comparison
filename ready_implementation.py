@@ -12,14 +12,14 @@ from optparse import OptionParser
 import sys
 from time import time
 import matplotlib.pyplot as plt
+import pickle
 
 from sklearn.datasets import fetch_20newsgroups
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.feature_extraction.text import HashingVectorizer
+from sklearn.feature_extraction.text import TfidfVectorizer, HashingVectorizer, CountVectorizer
 from sklearn.feature_selection import SelectKBest, chi2, SelectFromModel, f_regression, RFE, SelectPercentile
 from sklearn.linear_model import RidgeClassifier
-from sklearn.pipeline import Pipeline
-from sklearn.svm import LinearSVC
+from sklearn.pipeline import Pipeline, make_pipeline
+from sklearn.svm import LinearSVC, SVR, SVC
 from sklearn.linear_model import SGDClassifier
 from sklearn.linear_model import Perceptron
 from sklearn.linear_model import PassiveAggressiveClassifier
@@ -32,6 +32,7 @@ from sklearn import metrics
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import KFold, GridSearchCV
 from sklearn.externals.joblib import Memory
+
 import tempfile
 
 # Display progress logs on stdout
@@ -123,6 +124,8 @@ print()
 
 # split a training set and a test set
 y_train, y_test = data_train.target, data_test.target
+
+"""TF-IDF - use transformer, then vectorizer """
 
 print("Extracting features from the training data using a sparse vectorizer")
 t0 = time()
@@ -263,8 +266,6 @@ print("Elastic-Net penalty")
 
 
 """Forward feature selection"""
-
-
 def f_regression_test(X, Y):
     return f_regression(X, Y, center=False)
 
@@ -283,9 +284,9 @@ X_test_new = anova.transform(X_test_new)
 
 ridge = RidgeClassifier(tol=1e-2, solver="lsqr")
 
-clf = ridge
+# clf = ridge
 
-# clf = Pipeline([('anova', anova), ('ridge', ridge)])
+clf = Pipeline([('anova', anova), ('ridge', ridge)])
 # clf = GridSearchCV(clf, {'anova__percentile': [5, 10, 20]}, cv=KFold())
 clf.fit(X_new, y_train)  # set the best parameters
 feature_names = []
@@ -295,6 +296,53 @@ feature_names = [feature_names[i] for i
 feature_names = np.asarray(feature_names)
 
 pred_test = clf.predict(X_test_new)
+score = metrics.accuracy_score(y_test, pred_test)
+test_coef = clf._final_estimator.coef_
+# for i, label in enumerate(target_names):
+#     top10 = np.argsort(test_coef[i])[-10:]
+#     print(trim("%s: %s" % (label, " ".join(feature_names[top10]))))
+if hasattr(clf, 'coef_'):
+    print("dimensionality: %d" % clf.coef_.shape[1])
+    print("density: %f" % density(clf.coef_))
+
+    if opts.print_top10 and feature_names is not None:
+        print("top 10 keywords per class:")
+        for i, label in enumerate(target_names):
+            top10 = np.argsort(clf.coef_[i])[-10:]
+            print(trim("%s: %s" % (label, " ".join(feature_names[top10]))))
+    print()
+# # coef_ = clf.best_estimator_.steps[-1][1].coef_
+
+
+"""Second forward feature selection"""
+
+# temp_vector = HashingVectorizer(stop_words=None, non_negative=True, n_features=2 ** 16)
+# cv = CountVectorizer()
+# cv.fit_transform(data_train.data)
+# X_new = temp_vector.transform(data_train.data)
+# X_test_new = temp_vector.transform(data_test.data)
+# # feature_names = temp_vector.get_feature_names()
+# def f_regression_test(X, Y):
+#     return f_regression(X, Y, center=False)
+# # ANOVA SVM-C
+# # 1) anova filter, take 3 best ranked features
+# anova_filter = SelectKBest(f_regression_test, k=3)
+# # 2) svm
+# clf = SVC(kernel='linear')
+#
+# anova_svm = make_pipeline(anova_filter, clf)
+# anova_svm.fit(X_new, y_train)
+# pred_test  = anova_svm.predict(X_test_new)
+# clf = Pipeline([('anova', anova), ('ridge', ridge)])
+# clf = GridSearchCV(clf, {'anova__percentile': [5, 10, 20]}, cv=KFold())
+# clf.fit(X_new, y_train)  # set the best parameters
+# feature_names = []
+# feature_names = temp_vector.get_feature_names()
+# feature_names = [feature_names[i] for i
+#                  in anova.get_support(indices=True)]
+# feature_names = np.asarray(feature_names)
+
+# pred_test = clf.predict(X_test_new)
 score = metrics.accuracy_score(y_test, pred_test)
 
 if hasattr(clf, 'coef_'):
@@ -307,6 +355,47 @@ if hasattr(clf, 'coef_'):
             top10 = np.argsort(clf.coef_[i])[-10:]
             print(trim("%s: %s" % (label, " ".join(feature_names[top10]))))
     print()
+
+"""Backward feature selection"""
+
+# temp_vector = TfidfVectorizer(sublinear_tf=True, max_df=0.5, stop_words='english')
+# X_new = temp_vector.fit_transform(data_train.data)
+# X_test_new = temp_vector.transform(data_test.data)
+# lr_estimator = SVR(kernel="linear") #LogisticRegression(penalty='l1')
+# # anova = RFE(lr_estimator,  n_features_to_select=3000, step=100)
+# # test = anova.fit(X_new, y_train)
+# # pickle.dump(test, open("rftrain.p", "wb"))
+# anova = pickle.load(open("rftrain.p", "rb"))
+# # X_new = anova.fit_transform(X_new, y_train)
+# # X_test_new = anova.transform(X_test_new)
+# #
+# # ridge = RidgeClassifier(tol=1e-2, solver="lsqr")
+#
+# # clf = anova
+#
+# # clf = Pipeline([('anova', anova), ('ridge', ridge)])
+# # clf = GridSearchCV(clf, {'anova__percentile': [5, 10, 20]}, cv=KFold())
+# # clf.fit(X_new, y_train)  # set the best parameters
+# feature_names = []
+# feature_names = temp_vector.get_feature_names()
+# feature_names = [feature_names[i] for i
+#                  in anova.get_support(indices=True)]
+# feature_names = np.asarray(feature_names)
+#
+# pred_test = anova.predict(X_test_new)
+# pred_test_new = anova.score(X_test_new, y_test)
+# score = metrics.accuracy_score(y_test, pred_test)
+
+# if hasattr(clf, 'coef_'):
+#     print("dimensionality: %d" % clf.coef_.shape[1])
+#     print("density: %f" % density(clf.coef_))
+#
+#     if opts.print_top10 and feature_names is not None:
+#         print("top 10 keywords per class:")
+#         for i, label in enumerate(target_names):
+#             top10 = np.argsort(clf.coef_[i])[-10:]
+#             print(trim("%s: %s" % (label, " ".join(feature_names[top10]))))
+#     print()
 # coef_ = clf.best_estimator_.steps[-1][1].coef_
 
 
